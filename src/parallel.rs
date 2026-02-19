@@ -146,18 +146,16 @@ impl Parallel {
             let global_block_idx = batch_start_block + block_idx;
             let global_offset = global_block_idx * self.block_size;
 
-            // Search for needle in this block
-            for (idx, &byte) in block_data.iter().enumerate() {
-                if byte == needle {
-                    // Try to set found flag atomically
-                    if !state.found.swap(true, Ordering::SeqCst) {
-                        // We're the first to find it
-                        state
-                            .found_offset
-                            .store(global_offset + idx, Ordering::SeqCst);
-                    }
-                    return Ok(());
+            // Search for needle in this block using SIMD-optimized memchr
+            if let Some(idx) = memchr::memchr(needle, block_data) {
+                // Try to set found flag atomically
+                if !state.found.swap(true, Ordering::SeqCst) {
+                    // We're the first to find it
+                    state
+                        .found_offset
+                        .store(global_offset + idx, Ordering::SeqCst);
                 }
+                return Ok(());
             }
 
             // Update progress

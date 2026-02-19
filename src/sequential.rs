@@ -33,13 +33,12 @@ impl Sequential {
             match file.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(n) => {
-                    for (index_in_block, byte) in buffer[..n].iter().enumerate() {
-                        if byte == &needle {
-                            return Ok(SearchResult {
-                                bytes_searched: index + index_in_block + 1,
-                                found_at: Some(index + index_in_block),
-                            });
-                        }
+                    // Search for needle using SIMD-optimized memchr
+                    if let Some(index_in_block) = memchr::memchr(needle, &buffer[..n]) {
+                        return Ok(SearchResult {
+                            bytes_searched: index + index_in_block + 1,
+                            found_at: Some(index + index_in_block),
+                        });
                     }
                     index += n;
 

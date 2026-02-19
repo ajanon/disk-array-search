@@ -326,18 +326,16 @@ async fn searcher_worker(
             Some(block) => {
                 let block_size = block.data.len();
 
-                // Search for needle in this block
-                for (index_in_block, &byte) in block.data.iter().enumerate() {
-                    if byte == needle {
-                        let found_at = block.offset + index_in_block;
-                        let result = SearchResult {
-                            bytes_searched: found_at + 1,
-                            found_at: Some(found_at),
-                        };
-                        println!("Worker {worker_id} found needle at offset {found_at}");
-                        let _ = result_tx.send(result).await;
-                        return Ok(());
-                    }
+                // Search for needle in this block using SIMD-optimized memchr
+                if let Some(index_in_block) = memchr::memchr(needle, &block.data) {
+                    let found_at = block.offset + index_in_block;
+                    let result = SearchResult {
+                        bytes_searched: found_at + 1,
+                        found_at: Some(found_at),
+                    };
+                    println!("Worker {worker_id} found needle at offset {found_at}");
+                    let _ = result_tx.send(result).await;
+                    return Ok(());
                 }
 
                 // Send progress update after processing the block
