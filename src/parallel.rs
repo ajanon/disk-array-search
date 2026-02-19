@@ -12,6 +12,7 @@ pub struct Parallel {
     pub block_size: usize,
     pub parallelism: usize,
     pub batch_multiplier: usize,
+    pub use_simd: bool,
 }
 
 /// Interval in blocks at which to print progress updates during the search
@@ -146,8 +147,14 @@ impl Parallel {
             let global_block_idx = batch_start_block + block_idx;
             let global_offset = global_block_idx * self.block_size;
 
-            // Search for needle in this block using SIMD-optimized memchr
-            if let Some(idx) = memchr::memchr(needle, block_data) {
+            // Search for needle in this block
+            let found_idx = if self.use_simd {
+                memchr::memchr(needle, block_data)
+            } else {
+                block_data.iter().position(|&b| b == needle)
+            };
+
+            if let Some(idx) = found_idx {
                 // Try to set found flag atomically
                 if !state.found.swap(true, Ordering::SeqCst) {
                     // We're the first to find it
@@ -165,7 +172,10 @@ impl Parallel {
                 let elapsed = state.start_time.elapsed().as_secs_f64();
                 let mb_processed = bytes_processed as f64 / (1024.0 * 1024.0);
                 let throughput = mb_processed / elapsed;
-                println!("Processed: {mb_processed:.2} MiB ({total_processed} blocks, {throughput:.2} MiB/s)");
+                println!(
+                    "Processed: {mb_processed:.2} MiB ({total_processed} blocks, {throughput:.2} \
+                     MiB/s)"
+                );
             }
 
             Ok(())

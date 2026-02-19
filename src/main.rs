@@ -23,6 +23,10 @@ struct Cli {
     #[arg(long)]
     block_size: ByteSize,
 
+    /// Disable SIMD optimization for search
+    #[arg(long)]
+    no_simd: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -73,19 +77,26 @@ async fn main() -> Result<()> {
     let res = match cli.command {
         Commands::Sequential => {
             println!("Running sequential search");
+            println!("SIMD: {}", !cli.no_simd);
             let searcher = sequential::Sequential {
                 block_size: usize::try_from(cli.block_size.as_u64())?,
+                use_simd: !cli.no_simd,
             };
             searcher.search(&cli.input_file, NEEDLE)?
         },
-        Commands::Parallel { parallelism, batch_multiplier } => {
+        Commands::Parallel {
+            parallelism,
+            batch_multiplier,
+        } => {
             println!("Running parallel (rayon) search");
             println!("Parallelism: {parallelism}");
             println!("Batch multiplier: {batch_multiplier}");
+            println!("SIMD: {}", !cli.no_simd);
             let searcher = parallel::Parallel {
                 block_size: usize::try_from(cli.block_size.as_u64())?,
                 parallelism,
                 batch_multiplier,
+                use_simd: !cli.no_simd,
             };
             searcher.search(&cli.input_file, NEEDLE)?
         },
@@ -96,10 +107,12 @@ async fn main() -> Result<()> {
             println!("Running async (tokio) search");
             println!("Read parallelism: {read_parallelism}");
             println!("Search parallelism: {search_parallelism}");
+            println!("SIMD: {}", !cli.no_simd);
             let searcher = r#async::Async {
                 block_size: usize::try_from(cli.block_size.as_u64())?,
                 read_parallelism,
                 search_parallelism,
+                use_simd: !cli.no_simd,
             };
             searcher.search(&cli.input_file, NEEDLE).await?
         },

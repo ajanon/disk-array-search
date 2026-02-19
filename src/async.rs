@@ -13,6 +13,7 @@ pub struct Async {
     pub block_size: usize,
     pub read_parallelism: u16,
     pub search_parallelism: u16,
+    pub use_simd: bool,
 }
 
 /// Interval in blocks at which to print progress updates during the search
@@ -107,9 +108,19 @@ impl Async {
             let result_tx = result_tx.clone();
             let progress_tx = progress_tx.clone();
             let cancel = cancel_token.clone();
+            let use_simd = self.use_simd;
 
             let handle = tokio::spawn(async move {
-                searcher_worker(worker_id, block_rx, result_tx, progress_tx, needle, cancel).await
+                searcher_worker(
+                    worker_id,
+                    block_rx,
+                    result_tx,
+                    progress_tx,
+                    needle,
+                    use_simd,
+                    cancel,
+                )
+                .await
             });
             searcher_handles.push(handle);
         }
@@ -309,6 +320,7 @@ async fn searcher_worker(
     result_tx: mpsc::Sender<SearchResult>,
     progress_tx: mpsc::Sender<ProgressUpdate>,
     needle: u8,
+    use_simd: bool,
     cancel: CancellationToken,
 ) -> Result<()> {
     loop {
@@ -326,8 +338,14 @@ async fn searcher_worker(
             Some(block) => {
                 let block_size = block.data.len();
 
-                // Search for needle in this block using SIMD-optimized memchr
-                if let Some(index_in_block) = memchr::memchr(needle, &block.data) {
+                // Search for needle in this block
+                let found_index = if use_simd {
+                    memchr::memchr(needle, &block.data)
+                } else {
+                    block.data.iter().position(|&b| b == needle)
+                };
+
+                if let Some(index_in_block) = found_index {
                     let found_at = block.offset + index_in_block;
                     let result = SearchResult {
                         bytes_searched: found_at + 1,

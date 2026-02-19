@@ -8,6 +8,7 @@ use crate::SearchResult;
 
 pub struct Sequential {
     pub block_size: usize,
+    pub use_simd: bool,
 }
 
 /// Interval in blocks at which to print progress updates during the search
@@ -32,8 +33,14 @@ impl Sequential {
             match file.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(n) => {
-                    // Search for needle using SIMD-optimized memchr
-                    if let Some(index_in_block) = memchr::memchr(needle, &buffer[..n]) {
+                    // Search for needle
+                    let found_index = if self.use_simd {
+                        memchr::memchr(needle, &buffer[..n])
+                    } else {
+                        buffer[..n].iter().position(|&b| b == needle)
+                    };
+
+                    if let Some(index_in_block) = found_index {
                         return Ok(SearchResult {
                             bytes_searched: index + index_in_block + 1,
                             found_at: Some(index + index_in_block),
