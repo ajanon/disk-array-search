@@ -1,11 +1,12 @@
 #!/bin/bash -eu
 
-# Should be twice RAM size
-declare -r FILESIZE_GB="128"
 declare -r RUNTIME="60"
 
+# Should be twice RAM size and equal to what's used in prepare-input-file.sh
+declare -r FILESIZE_GB="128"
+
 declare -r FIO_DIR=".fio"
-declare -r INPUT_FILENAME="${FIO_DIR}/fio-input-file"
+declare -r INPUT_FILENAME="read-input-file"
 declare -r OUTPUT_DIR="${FIO_DIR}/results"
 declare -r OUTPUT_CSV="${FIO_DIR}/results.csv"
 declare -r OUTPUT_GRAPH="${FIO_DIR}/throughput_graph.png"
@@ -55,17 +56,6 @@ filesize_bytes() {
     printf "%d" "$((FILESIZE_GB * 1024 * 1024 * 1024))"
 }
 
-prepare_input_file() {
-    mkdir -p "${FIO_DIR}"
-    if [[ ! -f "${INPUT_FILENAME}" ]] || [[ $(filesize_bytes) -ne $(stat -c%s "${INPUT_FILENAME}") ]]; then
-        rm -f "${INPUT_FILENAME}"
-        printf "Creating input file of size %sG at %s\n" "${FILESIZE_GB}" "${INPUT_FILENAME}" >&2
-        dd if=/dev/urandom of="${INPUT_FILENAME}" bs=1MiB count="$(filesize_bytes)B" status=progress
-        sync "${INPUT_FILENAME}"
-    else
-        printf "Input file %s already exists, skipping creation\n" "${INPUT_FILENAME}" >&2
-    fi
-}
 
 fio() {
     command fio \
@@ -209,7 +199,7 @@ main() {
 
     case "$command" in
         prepare)
-            prepare_input_file
+            ./prepare_input_file.sh
             ;;
         benchmark)
             benchmark "$@"
@@ -221,7 +211,7 @@ main() {
             generate_graph
             ;;
         all)
-            prepare_input_file
+            ./prepare_input_file.sh
             benchmark "$@"
             parse_results
             generate_graph
