@@ -1,9 +1,8 @@
 use std::io::Read;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::Result;
-use libc::O_DIRECT;
 
 use crate::SearchResult;
 
@@ -21,13 +20,13 @@ impl Sequential {
             .read(true)
             .write(false)
             .append(false)
-            .custom_flags(O_DIRECT)
             .open(input_path.as_ref())?;
 
         let mut buffer = vec![0; self.block_size];
 
         let mut index = 0;
         let progress_interval_bytes = self.block_size * PROGRESS_INTERVAL_BLOCK;
+        let start_time = Instant::now();
 
         loop {
             match file.read(&mut buffer) {
@@ -42,11 +41,16 @@ impl Sequential {
                     }
                     index += n;
 
-                    // Print progress every 128 blocks
+                    // Print progress every 1024 blocks
                     if index % progress_interval_bytes == 0 {
+                        let elapsed = start_time.elapsed().as_secs_f64();
                         let mb_processed = index as f64 / (1024.0 * 1024.0);
+                        let throughput = mb_processed / elapsed;
                         let block_count = index / self.block_size;
-                        println!("Processed: {mb_processed:.2} MiB ({block_count} blocks)",);
+                        println!(
+                            "Processed: {mb_processed:.2} MiB ({block_count} blocks, \
+                             {throughput:.2} MiB/s)"
+                        );
                     }
                 },
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => (),
