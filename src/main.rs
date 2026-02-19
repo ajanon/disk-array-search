@@ -6,6 +6,7 @@ use bytesize::ByteSize;
 use clap::{Parser, Subcommand};
 
 mod r#async;
+mod parallel;
 mod sequential;
 
 const NEEDLE: u8 = 0x42;
@@ -31,11 +32,22 @@ enum Commands {
     /// Run search sequentially
     Sequential,
 
-    /// Run search in parallel
+    /// Run search in parallel using rayon
     Parallel {
         /// Number of parallel workers
         #[arg(long)]
+        parallelism: usize,
+        /// Batch size multiplier (blocks per thread in each batch)
+        #[arg(long, default_value = "16")]
+        batch_multiplier: usize,
+    },
+
+    /// Run search asynchronously using tokio
+    Async {
+        /// Number of parallel readers
+        #[arg(long)]
         read_parallelism: u16,
+        /// Number of parallel searchers
         #[arg(long)]
         search_parallelism: u16,
     },
@@ -66,7 +78,18 @@ async fn main() -> Result<()> {
             };
             searcher.search(&cli.input_file, NEEDLE)?
         },
-        Commands::Parallel {
+        Commands::Parallel { parallelism, batch_multiplier } => {
+            println!("Running parallel (rayon) search");
+            println!("Parallelism: {parallelism}");
+            println!("Batch multiplier: {batch_multiplier}");
+            let searcher = parallel::Parallel {
+                block_size: usize::try_from(cli.block_size.as_u64())?,
+                parallelism,
+                batch_multiplier,
+            };
+            searcher.search(&cli.input_file, NEEDLE)?
+        },
+        Commands::Async {
             read_parallelism,
             search_parallelism,
         } => {
