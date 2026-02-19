@@ -1,8 +1,11 @@
 use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
 
 use anyhow::Result;
+use libc::O_DIRECT;
 
-use crate::{SearchResult, Searcher};
+use crate::SearchResult;
 
 pub struct Sequential {
     pub block_size: usize,
@@ -12,15 +15,22 @@ pub struct Sequential {
 /// operation.
 const PROGRESS_INTERVAL_BLOCK: usize = 1024;
 
-impl Searcher for Sequential {
-    fn search(&self, mut input: impl Read, needle: u8) -> Result<SearchResult> {
+impl Sequential {
+    pub fn search(&self, input_path: impl AsRef<Path>, needle: u8) -> Result<SearchResult> {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(false)
+            .append(false)
+            .custom_flags(O_DIRECT)
+            .open(input_path.as_ref())?;
+
         let mut buffer = vec![0; self.block_size];
 
         let mut index = 0;
         let progress_interval_bytes = self.block_size * PROGRESS_INTERVAL_BLOCK;
 
         loop {
-            match input.read(&mut buffer) {
+            match file.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(n) => {
                     for (index_in_block, byte) in buffer[..n].iter().enumerate() {

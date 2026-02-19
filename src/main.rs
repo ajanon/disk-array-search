@@ -1,5 +1,3 @@
-use std::io::Read;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -7,11 +5,10 @@ use anyhow::{Result, anyhow};
 use bytesize::ByteSize;
 use clap::{Parser, Subcommand};
 
-mod parallel;
+mod r#async;
 mod sequential;
 
 const NEEDLE: u8 = 0x42;
-const O_DIRECT: i32 = 0x4000;
 
 #[derive(Parser)]
 #[command(name = "disk-array-search")]
@@ -38,7 +35,9 @@ enum Commands {
     Parallel {
         /// Number of parallel workers
         #[arg(long)]
-        parallelism: u8,
+        read_parallelism: u16,
+        #[arg(long)]
+        search_parallelism: u16,
     },
 }
 
@@ -51,41 +50,37 @@ struct SearchResult {
     found_at: Option<usize>,
 }
 
-/// Trait for searchers that can perform a search operation on a file.
-trait Searcher {
-    /// Searches for the needle in the specified input file.
-    fn search(&self, input: impl Read, needle: u8) -> Result<SearchResult>;
-}
-
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     println!("Input file: {}", cli.input_file.display());
     println!("Block size: {} bytes", cli.block_size.as_u64());
 
-    let searcher = match cli.command {
+    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let res = match cli.command {
         Commands::Sequential => {
             println!("Running sequential search");
-            sequential::Sequential {
+            let searcher = sequential::Sequential {
                 block_size: usize::try_from(cli.block_size.as_u64())?,
-            }
+            };
+            searcher.search(&cli.input_file, NEEDLE)?
         },
-        Commands::Parallel { parallelism } => {
-            println!("Running parallel search");
-            println!("Parallelism: {parallelism}");
-            todo!();
+        Commands::Parallel {
+            read_parallelism,
+            search_parallelism,
+        } => {
+            println!("Running async (tokio) search");
+            println!("Read parallelism: {read_parallelism}");
+            println!("Search parallelism: {search_parallelism}");
+            let searcher = r#async::Async {
+                block_size: usize::try_from(cli.block_size.as_u64())?,
+                read_parallelism,
+                search_parallelism,
+            };
+            searcher.search(&cli.input_file, NEEDLE).await?
         },
     };
-
-    std::fs::OpenOptions::new()
-        .read(true)
-        .write(false)
-        .append(false)
-        .custom_flags(O_DIRECT)
-        .open(&cli.input_file)?;
-    let file = std::fs::File::open(&cli.input_file)?;
-    let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    let res = searcher.search(file, NEEDLE)?;
     let end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
     let duration = end
