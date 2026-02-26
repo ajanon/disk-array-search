@@ -197,7 +197,7 @@ async fn run() -> Result<()> {
         },
         OutputFormat::Csv => {
             let common = format!(
-                "{},{},{},{}",
+                "0x{:02x},{},{},{}",
                 cli.needle, block_size_bytes, simd, res.bytes_searched
             );
             match &cli.command {
