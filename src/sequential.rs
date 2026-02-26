@@ -54,7 +54,7 @@ impl Sequential {
                         let mb_processed = index as f64 / (1024.0 * 1024.0);
                         let throughput = mb_processed / elapsed;
                         let block_count = index / self.block_size;
-                        println!(
+                        eprintln!(
                             "Processed: {mb_processed:.2} MiB ({block_count} blocks, \
                              {throughput:.2} MiB/s)"
                         );

@@ -45,13 +45,13 @@ impl Parallel {
         // We want enough blocks to keep all threads busy
         let batch_size = self.parallelism * self.batch_multiplier;
 
-        println!(
+        eprintln!(
             "File size: {:.2} MiB ({} blocks of {} bytes)",
             file_size as f64 / (1024.0 * 1024.0),
             total_blocks,
             self.block_size
         );
-        println!(
+        eprintln!(
             "Processing in batches of {} blocks ({:.2} MiB per batch)",
             batch_size,
             (batch_size * self.block_size) as f64 / (1024.0 * 1024.0)
@@ -172,7 +172,7 @@ impl Parallel {
                 let elapsed = state.start_time.elapsed().as_secs_f64();
                 let mb_processed = bytes_processed as f64 / (1024.0 * 1024.0);
                 let throughput = mb_processed / elapsed;
-                println!(
+                eprintln!(
                     "Processed: {mb_processed:.2} MiB ({total_processed} blocks, {throughput:.2} \
                      MiB/s)"
                 );

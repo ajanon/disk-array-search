@@ -207,7 +207,7 @@ async fn printer_task(
             let read_throughput = mb_read / elapsed;
             let process_throughput = mb_processed / elapsed;
 
-            println!(
+            eprintln!(
                 "Progress: Dispatched {:.2} MiB ({} blocks, {:.2} MiB/s) | Read {:.2} MiB ({} \
                  blocks, {:.2} MiB/s) | Processed {:.2} MiB ({} blocks, {:.2} MiB/s)",
                 mb_dispatched,
@@ -351,7 +351,7 @@ async fn searcher_worker(
                         bytes_searched: found_at + 1,
                         found_at: Some(found_at),
                     };
-                    println!("Worker {worker_id} found needle at offset {found_at}");
+                    eprintln!("Worker {worker_id} found needle at offset {found_at}");
                     let _ = result_tx.send(result).await;
                     return Ok(());
                 }

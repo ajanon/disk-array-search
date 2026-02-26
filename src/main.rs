@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow};
 use bytesize::ByteSize;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 mod r#async;
 mod parallel;
@@ -16,6 +16,20 @@ fn parse_byte(s: &str) -> Result<u8, ParseIntError> {
     } else {
         s.parse::<u8>()
     }
+}
+
+#[derive(Clone, ValueEnum)]
+enum OutputFormat {
+    /// Human-readable output on stdout
+    Plain,
+    /// CSV line on stdout (no header). Columns vary by subcommand:
+    ///
+    /// ```text
+    /// sequential: command,needle,block_size_bytes,simd,bytes_searched,duration_secs
+    /// parallel:   command,needle,block_size_bytes,simd,parallelism,batch_multiplier,bytes_searched,duration_secs
+    /// async:      command,needle,block_size_bytes,simd,read_parallelism,search_parallelism,bytes_searched,duration_secs
+    /// ```
+    Csv,
 }
 
 #[derive(Parser)]
@@ -34,9 +48,14 @@ struct Cli {
     #[arg(long)]
     no_simd: bool,
 
-    /// Byte value to search for (decimal or hex with 0x prefix, e.g. 66 or 0x42)
+    /// Byte value to search for (decimal or hex with 0x prefix, e.g. 66 or
+    /// 0x42)
     #[arg(long, default_value = "0x42", value_parser = parse_byte)]
     needle: u8,
+
+    /// Output format
+    #[arg(long, value_enum, default_value = "plain")]
+    output_format: OutputFormat,
 
     #[command(subcommand)]
     command: Commands,
@@ -81,17 +100,21 @@ struct SearchResult {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    println!("Input file: {}", cli.input_file.display());
-    println!("Block size: {} bytes", cli.block_size.as_u64());
+    let block_size_bytes = cli.block_size.as_u64();
+    let simd = !cli.no_simd;
+
+    eprintln!("Input file: {}", cli.input_file.display());
+    eprintln!("Block size: {block_size_bytes} bytes");
+    eprintln!("Needle: 0x{:02x}", cli.needle);
 
     let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    let res = match cli.command {
+    let res = match &cli.command {
         Commands::Sequential => {
-            println!("Running sequential search");
-            println!("SIMD: {}", !cli.no_simd);
+            eprintln!("Running sequential search");
+            eprintln!("SIMD: {simd}");
             let searcher = sequential::Sequential {
-                block_size: usize::try_from(cli.block_size.as_u64())?,
-                use_simd: !cli.no_simd,
+                block_size: usize::try_from(block_size_bytes)?,
+                use_simd: simd,
             };
             searcher.search(&cli.input_file, cli.needle)?
         },
@@ -99,15 +122,16 @@ async fn main() -> Result<()> {
             parallelism,
             batch_multiplier,
         } => {
-            println!("Running parallel (rayon) search");
-            println!("Parallelism: {parallelism}");
-            println!("Batch multiplier: {batch_multiplier}");
-            println!("SIMD: {}", !cli.no_simd);
+            let (parallelism, batch_multiplier) = (*parallelism, *batch_multiplier);
+            eprintln!("Running parallel (rayon) search");
+            eprintln!("Parallelism: {parallelism}");
+            eprintln!("Batch multiplier: {batch_multiplier}");
+            eprintln!("SIMD: {simd}");
             let searcher = parallel::Parallel {
-                block_size: usize::try_from(cli.block_size.as_u64())?,
+                block_size: usize::try_from(block_size_bytes)?,
                 parallelism,
                 batch_multiplier,
-                use_simd: !cli.no_simd,
+                use_simd: simd,
             };
             searcher.search(&cli.input_file, cli.needle)?
         },
@@ -115,15 +139,16 @@ async fn main() -> Result<()> {
             read_parallelism,
             search_parallelism,
         } => {
-            println!("Running async (tokio) search");
-            println!("Read parallelism: {read_parallelism}");
-            println!("Search parallelism: {search_parallelism}");
-            println!("SIMD: {}", !cli.no_simd);
+            let (read_parallelism, search_parallelism) = (*read_parallelism, *search_parallelism);
+            eprintln!("Running async (tokio) search");
+            eprintln!("Read parallelism: {read_parallelism}");
+            eprintln!("Search parallelism: {search_parallelism}");
+            eprintln!("SIMD: {simd}");
             let searcher = r#async::Async {
-                block_size: usize::try_from(cli.block_size.as_u64())?,
+                block_size: usize::try_from(block_size_bytes)?,
                 read_parallelism,
                 search_parallelism,
-                use_simd: !cli.no_simd,
+                use_simd: simd,
             };
             searcher.search(&cli.input_file, cli.needle).await?
         },
@@ -133,15 +158,47 @@ async fn main() -> Result<()> {
     let duration = end
         .checked_sub(start)
         .ok_or(anyhow!("Duration calculation error"))?;
-    println!("Bytes searched: {}", res.bytes_searched);
-    println!("Time taken: {} seconds", duration.as_secs_f64());
-    println!(
-        "Throughput: {} MiB/s",
-        (res.bytes_searched as f64) / (duration.as_secs_f64() * 1024.0 * 1024.0)
-    );
-    match res.found_at {
-        Some(index) => println!("Needle found at index {index}"),
-        None => println!("Needle not found"),
+    let duration_secs = duration.as_secs_f64();
+
+    match cli.output_format {
+        OutputFormat::Plain => {
+            println!("Bytes searched: {}", res.bytes_searched);
+            println!("Time taken: {duration_secs} seconds");
+            println!(
+                "Throughput: {} MiB/s",
+                (res.bytes_searched as f64) / (duration_secs * 1024.0 * 1024.0)
+            );
+            match res.found_at {
+                Some(index) => println!("Needle found at index {index}"),
+                None => println!("Needle not found"),
+            }
+        },
+        OutputFormat::Csv => {
+            let common = format!(
+                "{},{},{},{}",
+                cli.needle, block_size_bytes, simd, res.bytes_searched
+            );
+            match &cli.command {
+                Commands::Sequential => {
+                    println!("sequential,{common},{duration_secs}");
+                },
+                Commands::Parallel {
+                    parallelism,
+                    batch_multiplier,
+                } => {
+                    println!("parallel,{common},{parallelism},{batch_multiplier},{duration_secs}");
+                },
+                Commands::Async {
+                    read_parallelism,
+                    search_parallelism,
+                } => {
+                    println!(
+                        "async,{common},{read_parallelism},{search_parallelism},{duration_secs}"
+                    );
+                },
+            }
+        },
     }
+
     Ok(())
 }
