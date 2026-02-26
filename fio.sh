@@ -6,10 +6,10 @@ declare -r RUNTIME="60"
 declare -r FILESIZE_GB="128"
 
 declare -r FIO_DIR=".fio"
-declare -r INPUT_FILENAME="read-input-file"
+declare -r INPUT_FILENAME="read-input-file-rand"
 declare -r OUTPUT_DIR="${FIO_DIR}/results"
-declare -r OUTPUT_CSV="${FIO_DIR}/results.csv"
-declare -r OUTPUT_GRAPH="${FIO_DIR}/throughput_graph.png"
+declare -r OUTPUT_CSV="results/fio.csv"
+declare -r OUTPUT_GRAPH="results/fio_throughput_graph.png"
 
 declare -ra BASE_ARGS=(
     --name=fio-seq-read

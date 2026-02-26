@@ -1,4 +1,5 @@
 /target
 .fio/
 
+read-input-file-rand
 read-input-file
