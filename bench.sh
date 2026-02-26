@@ -53,10 +53,7 @@ sudo_keepalive() {
     done 2>/dev/null &
 }
 
-drop_caches() {
-    printf "==> Dropping VM caches...\n" >&2
-    echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
-}
+drop_caches() { echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null; }
 
 # Drops VM caches, then runs the binary with the given arguments.
 # Stderr from the binary is silenced; stdout (the CSV line) is passed through.
