@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 mod r#async;
 mod parallel;
 mod sequential;
+mod topology;
 
 fn parse_byte(s: &str) -> Result<u8, ParseIntError> {
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
@@ -82,9 +83,20 @@ enum Commands {
         /// Number of parallel workers
         #[arg(long)]
         parallelism: usize,
-        /// Batch size multiplier (blocks per thread in each batch)
+        /// Batch size multiplier (blocks per thread in each batch).
+        /// Ignored when --l3-cache-size is set.
         #[arg(long, default_value = "16")]
         batch_multiplier: usize,
+        /// Total L3 cache size across all dies (e.g. 64m for 2×32 MiB).
+        /// When provided, batch_multiplier is auto-computed to fill ~75% of the
+        /// cache so each batch fits in L3 while leaving headroom for OS/stack.
+        #[arg(long)]
+        l3_cache_size: Option<ByteSize>,
+        /// Pin each rayon thread to a physical core based on die topology.
+        /// Threads are grouped by die so that threads sharing an L3 cache scan
+        /// contiguous memory regions, avoiding cross-die cache snooping.
+        #[arg(long, default_value = "false")]
+        pin_threads: bool,
     },
 
     /// Run search asynchronously using tokio
@@ -142,17 +154,27 @@ async fn run() -> Result<()> {
         Commands::Parallel {
             parallelism,
             batch_multiplier,
+            l3_cache_size,
+            pin_threads,
         } => {
-            let (parallelism, batch_multiplier) = (*parallelism, *batch_multiplier);
+            let (parallelism, pin_threads) = (*parallelism, *pin_threads);
+            let block_size = usize::try_from(block_size_bytes)?;
+            let batch_multiplier = if let Some(l3) = l3_cache_size {
+                let l3_bytes = l3.as_u64() as usize;
+                topology::auto_batch_multiplier(l3_bytes, parallelism, block_size, 0.75)
+            } else {
+                *batch_multiplier
+            };
             eprintln!("Running parallel (rayon) search");
             eprintln!("Parallelism: {parallelism}");
             eprintln!("Batch multiplier: {batch_multiplier}");
             eprintln!("SIMD: {simd}");
             let searcher = parallel::Parallel {
-                block_size: usize::try_from(block_size_bytes)?,
+                block_size,
                 parallelism,
                 batch_multiplier,
                 use_simd: simd,
+                pin_threads,
             };
             searcher.search(&cli.input_file, cli.needle)?
         },
@@ -207,8 +229,32 @@ async fn run() -> Result<()> {
                 Commands::Parallel {
                     parallelism,
                     batch_multiplier,
+                    l3_cache_size,
+                    pin_threads,
                 } => {
-                    println!("parallel,{common},{parallelism},{batch_multiplier},{duration_secs}");
+                    let block_size = usize::try_from(block_size_bytes)?;
+                    let resolved = if let Some(l3) = l3_cache_size {
+                        topology::auto_batch_multiplier(
+                            l3.as_u64() as usize,
+                            *parallelism,
+                            block_size,
+                            0.75,
+                        )
+                    } else {
+                        *batch_multiplier
+                    };
+                    // column order: command,needle,block_size_bytes,simd,parallelism,batch_multiplier,pin_threads,bytes_searched,duration_secs
+                    println!(
+                        "parallel,0x{:02x},{},{},{},{},{},{},{}",
+                        cli.needle,
+                        block_size_bytes,
+                        simd,
+                        parallelism,
+                        resolved,
+                        pin_threads,
+                        res.bytes_searched,
+                        duration_secs
+                    );
                 },
                 Commands::Async {
                     read_parallelism,

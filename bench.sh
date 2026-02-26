@@ -11,12 +11,29 @@ declare -r BINARY="./target/release/disk-array-search"
 
 declare -r OUT_SEQUENTIAL="results/sequential.csv"
 declare -r OUT_PARALLEL="results/parallel.csv"
+declare -r OUT_PARALLEL_L3="results/parallel_l3.csv"
 declare -r OUT_ASYNC="results/async.csv"
+
+# Total L3 cache size across all dies (used by benchmark_parallel_l3).
+# Adjust to match your hardware (e.g. 2x32MiB = 64m).
+declare -r L3_CACHE_SIZE="64MiB"
 
 declare -ra BLOCK_SIZES=(
     4KiB
     64KiB
     1MiB
+)
+
+# Block sizes for the L3-aware parallel benchmark.
+# The interesting range is around L3_per_die / threads_per_die.
+# With 2x32MiB and varying parallelism, this covers sub-L3 to over-L3 per thread.
+declare -ra L3_BLOCK_SIZES=(
+    1MiB
+    4MiB
+    8MiB
+    14MiB
+    16MiB
+    32MiB
 )
 
 # "" = simd enabled, "--no-simd" = simd disabled
@@ -103,31 +120,68 @@ benchmark_sequential() {
 }
 
 benchmark_parallel() {
-    # CSV header: command,needle,block_size_bytes,simd,parallelism,batch_multiplier,bytes_searched,duration_secs
-    printf "command,needle,block_size_bytes,simd,parallelism,batch_multiplier,bytes_searched,duration_secs\n" \
+    # CSV header: command,needle,block_size_bytes,simd,parallelism,batch_multiplier,pin_threads,bytes_searched,duration_secs
+    printf "command,needle,block_size_bytes,simd,parallelism,batch_multiplier,pin_threads,bytes_searched,duration_secs\n" \
         > "${OUT_PARALLEL}"
 
     for block_size in "${BLOCK_SIZES[@]}"; do
         for parallelism in "${PARALLELISM_VALUES[@]}"; do
             for batch_mult in "${BATCH_MULTIPLIER_VALUES[@]}"; do
-                for simd_flag in "${SIMD_MODES[@]}"; do
-                    declare simd_label="true"
-                    if [[ "${simd_flag}" == "--no-simd" ]]; then simd_label="false"; fi
-                    printf "  parallel  bs=%-6s  p=%-4s  bm=%-4s  simd=%s\n" \
-                        "${block_size}" "${parallelism}" "${batch_mult}" "${simd_label}" >&2
+                for pin_flag in "" "--pin-threads"; do
+                    declare pin_label="false"
+                    if [[ "${pin_flag}" == "--pin-threads" ]]; then pin_label="true"; fi
+                    printf "  parallel  bs=%-6s  p=%-4s  bm=%-4s  simd=true  pin=%s\n" \
+                        "${block_size}" "${parallelism}" "${batch_mult}" "${pin_label}" >&2
                     declare -a args=(
                         --input-file="${INPUT_FILE}"
                         --block-size="${block_size}"
                         --needle="${NEEDLE}"
                         --output-format=csv
                     )
-                    [[ -n "${simd_flag}" ]] && args+=("${simd_flag}")
+                    declare -a command_args=(
+                        --parallelism="${parallelism}"
+                        --batch-multiplier="${batch_mult}"
+                    )
+                    [[ -n "${pin_flag}" ]] && command_args+=("${pin_flag}")
                     run_bench "${args[@]}" parallel \
-                        --parallelism="${parallelism}" \
-                        --batch-multiplier="${batch_mult}" \
+                        "${command_args[@]}" \
                         >> "${OUT_PARALLEL}"
                     sync "${OUT_PARALLEL}"
                 done
+            done
+        done
+    done
+}
+
+benchmark_parallel_l3() {
+    # Like benchmark_parallel but uses --l3-cache-size to auto-size the batch
+    # and sweeps L3-specific block sizes. SIMD is always enabled.
+    # CSV header: same as parallel
+    printf "command,needle,block_size_bytes,simd,parallelism,batch_multiplier,pin_threads,bytes_searched,duration_secs\n" \
+        > "${OUT_PARALLEL_L3}"
+
+    for block_size in "${L3_BLOCK_SIZES[@]}"; do
+        for parallelism in "${PARALLELISM_VALUES[@]}"; do
+            for pin_flag in "" "--pin-threads"; do
+                declare pin_label="false"
+                if [[ "${pin_flag}" == "--pin-threads" ]]; then pin_label="true"; fi
+                printf "  parallel_l3  bs=%-6s  p=%-4s  l3=%s  pin=%s\n" \
+                    "${block_size}" "${parallelism}" "${L3_CACHE_SIZE}" "${pin_label}" >&2
+                declare -a args=(
+                    --input-file="${INPUT_FILE}"
+                    --block-size="${block_size}"
+                    --needle="${NEEDLE}"
+                    --output-format=csv
+                )
+                declare -a command_args=(
+                    --parallelism="${parallelism}"
+                    --l3-cache-size="${L3_CACHE_SIZE}"
+                )
+                [[ -n "${pin_flag}" ]] && command_args+=("${pin_flag}")
+                run_bench "${args[@]}" parallel \
+                    "${command_args[@]}" \
+                    >> "${OUT_PARALLEL_L3}"
+                sync "${OUT_PARALLEL_L3}"
             done
         done
     done
@@ -167,7 +221,7 @@ benchmark_async() {
 benchmark() {
     declare -a targets=("$@")
     if [[ ${#targets[@]} -eq 0 ]]; then
-        targets=(sequential parallel async)
+        targets=(sequential parallel parallel_l3 async)
     fi
 
     mkdir -p "results"
@@ -187,13 +241,18 @@ benchmark() {
                 benchmark_parallel
                 printf "  -> %s\n" "${OUT_PARALLEL}" >&2
                 ;;
+            parallel_l3)
+                printf "\n==> Running parallel L3-aware benchmarks...\n" >&2
+                benchmark_parallel_l3
+                printf "  -> %s\n" "${OUT_PARALLEL_L3}" >&2
+                ;;
             async)
                 printf "\n==> Running async benchmarks...\n" >&2
                 benchmark_async
                 printf "  -> %s\n" "${OUT_ASYNC}" >&2
                 ;;
             *)
-                printf "Unknown benchmark: %s (valid: sequential, parallel, async)\n" \
+                printf "Unknown benchmark: %s (valid: sequential, parallel, parallel_l3, async)\n" \
                     "${target}" >&2
                 exit 1
                 ;;
@@ -221,7 +280,7 @@ main() {
             printf "\n" >&2
             printf "Commands:\n" >&2
             printf "  prepare    - Prepare input file with needle at last byte\n" >&2
-            printf "  benchmark  - Run benchmarks (default: all; or pass subset: sequential parallel async)\n" >&2
+            printf "  benchmark  - Run benchmarks (default: all; or pass subset: sequential parallel parallel_l3 async)\n" >&2
             printf "  all        - Run prepare + benchmark (default)\n" >&2
             exit 1
             ;;

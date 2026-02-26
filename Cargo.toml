@@ -12,3 +12,4 @@ tokio = { version = "1.49", features = ["full"] }
 tokio-util = "0.7"
 rayon = "1.11"
 memchr = "2.8"
+core_affinity = "0.8"

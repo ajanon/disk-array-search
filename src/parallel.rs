@@ -4,15 +4,20 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use anyhow::Result;
+use core_affinity;
 use rayon::prelude::*;
 
-use crate::SearchResult;
+use crate::{SearchResult, topology};
 
 pub struct Parallel {
     pub block_size: usize,
     pub parallelism: usize,
     pub batch_multiplier: usize,
     pub use_simd: bool,
+    /// When true, pin each rayon thread to a specific core based on die
+    /// topology so that threads sharing an L3 cache work on the same memory
+    /// region.
+    pub pin_threads: bool,
 }
 
 /// Interval in blocks at which to print progress updates during the search
@@ -57,11 +62,32 @@ impl Parallel {
             (batch_size * self.block_size) as f64 / (1024.0 * 1024.0)
         );
 
-        // Set rayon thread pool size
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(self.parallelism)
-            .build()
-            .unwrap();
+        // Set rayon thread pool size, optionally pinning each thread to a core
+        let pool = {
+            let mut builder = rayon::ThreadPoolBuilder::new().num_threads(self.parallelism);
+            if self.pin_threads {
+                let groups = topology::cores_by_die();
+                let pin_list = topology::pinning_list(self.parallelism, &groups);
+
+                eprintln!("Thread pinning enabled ({} die(s) detected):", groups.len());
+                for (thread_idx, &core_id) in pin_list.iter().enumerate() {
+                    // Find which die this core belongs to for the log message
+                    let die = groups
+                        .iter()
+                        .find(|(_, cores)| cores.contains(&core_id))
+                        .map(|(die_id, _)| *die_id)
+                        .unwrap_or(0);
+                    eprintln!("  thread {thread_idx} → core {core_id} (die {die})");
+                }
+
+                builder = builder.start_handler(move |thread_idx| {
+                    if let Some(&core_id) = pin_list.get(thread_idx) {
+                        core_affinity::set_for_current(core_affinity::CoreId { id: core_id });
+                    }
+                });
+            }
+            builder.build().unwrap()
+        };
 
         // Shared search state
         let state = SearchState {
