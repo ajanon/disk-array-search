@@ -34,7 +34,12 @@ enum OutputFormat {
 
 #[derive(Parser)]
 #[command(name = "disk-array-search")]
-#[command(about = "Search in sequential or parallel mode", long_about = None)]
+#[command(
+    about = "Search in sequential or parallel mode",
+    long_about = "Search for a byte value in a file using sequential, parallel, or async \
+                  I/O.\n\nExit codes:\n  0  Needle found\n  1  Error\n  2  Needle not found (no \
+                  output is produced)"
+)]
 struct Cli {
     /// Input file path
     #[arg(long)]
@@ -97,7 +102,17 @@ struct SearchResult {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    match run().await {
+        Ok(()) => {},
+        Err(e) => {
+            eprintln!("Error: {e:#}");
+            std::process::exit(1);
+        },
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     let block_size_bytes = cli.block_size.as_u64();
@@ -155,6 +170,10 @@ async fn main() -> Result<()> {
     };
     let end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
+    if res.found_at.is_none() {
+        std::process::exit(2);
+    }
+
     let duration = end
         .checked_sub(start)
         .ok_or(anyhow!("Duration calculation error"))?;
@@ -168,10 +187,7 @@ async fn main() -> Result<()> {
                 "Throughput: {} MiB/s",
                 (res.bytes_searched as f64) / (duration_secs * 1024.0 * 1024.0)
             );
-            match res.found_at {
-                Some(index) => println!("Needle found at index {index}"),
-                None => println!("Needle not found"),
-            }
+            println!("Needle found at index {}", res.found_at.unwrap());
         },
         OutputFormat::Csv => {
             let common = format!(
