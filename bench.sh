@@ -14,9 +14,9 @@ declare -r OUT_PARALLEL="results/parallel.csv"
 declare -r OUT_ASYNC="results/async.csv"
 
 declare -ra BLOCK_SIZES=(
-    4k
-    64k
-    1m
+    4KiB
+    64KiB
+    1MiB
 )
 
 # "" = simd enabled, "--no-simd" = simd disabled
