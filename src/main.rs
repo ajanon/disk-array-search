@@ -62,8 +62,8 @@ struct Cli {
         long_help = "Output format.\n\nFor csv, columns depend on the subcommand:\n  sequential: \
                      command,needle,block_size_bytes,simd,bytes_searched,duration_secs\n  \
                      parallel:   \
-                     command,needle,block_size_bytes,simd,parallelism,batch_multiplier,\
-                     bytes_searched,duration_secs\n  async:      \
+                     command,needle,block_size_bytes,simd,parallelism,num_readers,\
+                     batch_multiplier,pin_threads,bytes_searched,duration_secs\n  async:      \
                      command,needle,block_size_bytes,simd,read_parallelism,search_parallelism,\
                      bytes_searched,duration_secs"
     )]
@@ -83,6 +83,11 @@ enum Commands {
         /// Number of parallel workers
         #[arg(long)]
         parallelism: usize,
+        /// Number of independent reader threads.  Each reader owns a
+        /// contiguous file segment; IO and CPU processing overlap across
+        /// segments via a per-reader double-buffer channel.
+        #[arg(long, default_value = "1")]
+        num_readers: usize,
         /// Batch size multiplier (blocks per thread in each batch).
         /// Ignored when --l3-cache-size is set.
         #[arg(long, default_value = "16")]
@@ -92,9 +97,9 @@ enum Commands {
         /// cache so each batch fits in L3 while leaving headroom for OS/stack.
         #[arg(long)]
         l3_cache_size: Option<ByteSize>,
-        /// Pin each rayon thread to a physical core based on die topology.
-        /// Threads are grouped by die so that threads sharing an L3 cache scan
-        /// contiguous memory regions, avoiding cross-die cache snooping.
+        /// Pin each reader thread and its rayon worker pool to a specific die
+        /// so that IO and compute share the same L3 cache.  Readers are
+        /// assigned to dies round-robin.
         #[arg(long, default_value = "false")]
         pin_threads: bool,
     },
@@ -153,11 +158,13 @@ async fn run() -> Result<()> {
         },
         Commands::Parallel {
             parallelism,
+            num_readers,
             batch_multiplier,
             l3_cache_size,
             pin_threads,
         } => {
-            let (parallelism, pin_threads) = (*parallelism, *pin_threads);
+            let (parallelism, num_readers, pin_threads) =
+                (*parallelism, *num_readers, *pin_threads);
             let block_size = usize::try_from(block_size_bytes)?;
             let batch_multiplier = if let Some(l3) = l3_cache_size {
                 let l3_bytes = l3.as_u64() as usize;
@@ -167,11 +174,13 @@ async fn run() -> Result<()> {
             };
             eprintln!("Running parallel (rayon) search");
             eprintln!("Parallelism: {parallelism}");
+            eprintln!("Readers: {num_readers}");
             eprintln!("Batch multiplier: {batch_multiplier}");
             eprintln!("SIMD: {simd}");
             let searcher = parallel::Parallel {
                 block_size,
                 parallelism,
+                num_readers,
                 batch_multiplier,
                 use_simd: simd,
                 pin_threads,
@@ -228,6 +237,7 @@ async fn run() -> Result<()> {
                 },
                 Commands::Parallel {
                     parallelism,
+                    num_readers,
                     batch_multiplier,
                     l3_cache_size,
                     pin_threads,
@@ -243,13 +253,15 @@ async fn run() -> Result<()> {
                     } else {
                         *batch_multiplier
                     };
-                    // column order: command,needle,block_size_bytes,simd,parallelism,batch_multiplier,pin_threads,bytes_searched,duration_secs
+                    // columns: command,needle,block_size_bytes,simd,parallelism,num_readers,
+                    // batch_multiplier,pin_threads,bytes_searched,duration_secs
                     println!(
-                        "parallel,0x{:02x},{},{},{},{},{},{},{}",
+                        "parallel,0x{:02x},{},{},{},{},{},{},{},{}",
                         cli.needle,
                         block_size_bytes,
                         simd,
                         parallelism,
+                        num_readers,
                         resolved,
                         pin_threads,
                         res.bytes_searched,

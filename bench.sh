@@ -40,6 +40,7 @@ declare -ra L3_BLOCK_SIZES=(
 declare -ra SIMD_MODES=("" "--no-simd")
 
 declare -ra PARALLELISM_VALUES=(4 16 32)
+declare -ra NUM_READERS_VALUES=(1 2 4)
 declare -ra BATCH_MULTIPLIER_VALUES=(4 16 32)
 
 declare -ra READ_PARALLELISM_VALUES=(4 16)
@@ -120,33 +121,36 @@ benchmark_sequential() {
 }
 
 benchmark_parallel() {
-    # CSV header: command,needle,block_size_bytes,simd,parallelism,batch_multiplier,pin_threads,bytes_searched,duration_secs
-    printf "command,needle,block_size_bytes,simd,parallelism,batch_multiplier,pin_threads,bytes_searched,duration_secs\n" \
+    # CSV header: command,needle,block_size_bytes,simd,parallelism,num_readers,batch_multiplier,pin_threads,bytes_searched,duration_secs
+    printf "command,needle,block_size_bytes,simd,parallelism,num_readers,batch_multiplier,pin_threads,bytes_searched,duration_secs\n" \
         > "${OUT_PARALLEL}"
 
     for block_size in "${BLOCK_SIZES[@]}"; do
         for parallelism in "${PARALLELISM_VALUES[@]}"; do
-            for batch_mult in "${BATCH_MULTIPLIER_VALUES[@]}"; do
-                for pin_flag in "" "--pin-threads"; do
-                    declare pin_label="false"
-                    if [[ "${pin_flag}" == "--pin-threads" ]]; then pin_label="true"; fi
-                    printf "  parallel  bs=%-6s  p=%-4s  bm=%-4s  simd=true  pin=%s\n" \
-                        "${block_size}" "${parallelism}" "${batch_mult}" "${pin_label}" >&2
-                    declare -a args=(
-                        --input-file="${INPUT_FILE}"
-                        --block-size="${block_size}"
-                        --needle="${NEEDLE}"
-                        --output-format=csv
-                    )
-                    declare -a command_args=(
-                        --parallelism="${parallelism}"
-                        --batch-multiplier="${batch_mult}"
-                    )
-                    [[ -n "${pin_flag}" ]] && command_args+=("${pin_flag}")
-                    run_bench "${args[@]}" parallel \
-                        "${command_args[@]}" \
-                        >> "${OUT_PARALLEL}"
-                    sync "${OUT_PARALLEL}"
+            for num_readers in "${NUM_READERS_VALUES[@]}"; do
+                for batch_mult in "${BATCH_MULTIPLIER_VALUES[@]}"; do
+                    for pin_flag in "" "--pin-threads"; do
+                        declare pin_label="false"
+                        if [[ "${pin_flag}" == "--pin-threads" ]]; then pin_label="true"; fi
+                        printf "  parallel  bs=%-6s  p=%-4s  r=%-4s  bm=%-4s  pin=%s\n" \
+                            "${block_size}" "${parallelism}" "${num_readers}" "${batch_mult}" "${pin_label}" >&2
+                        declare -a args=(
+                            --input-file="${INPUT_FILE}"
+                            --block-size="${block_size}"
+                            --needle="${NEEDLE}"
+                            --output-format=csv
+                        )
+                        declare -a command_args=(
+                            --parallelism="${parallelism}"
+                            --num-readers="${num_readers}"
+                            --batch-multiplier="${batch_mult}"
+                        )
+                        [[ -n "${pin_flag}" ]] && command_args+=("${pin_flag}")
+                        run_bench "${args[@]}" parallel \
+                            "${command_args[@]}" \
+                            >> "${OUT_PARALLEL}"
+                        sync "${OUT_PARALLEL}"
+                    done
                 done
             done
         done
@@ -156,32 +160,35 @@ benchmark_parallel() {
 benchmark_parallel_l3() {
     # Like benchmark_parallel but uses --l3-cache-size to auto-size the batch
     # and sweeps L3-specific block sizes. SIMD is always enabled.
-    # CSV header: same as parallel
-    printf "command,needle,block_size_bytes,simd,parallelism,batch_multiplier,pin_threads,bytes_searched,duration_secs\n" \
+    # CSV header: command,needle,block_size_bytes,simd,parallelism,num_readers,batch_multiplier,pin_threads,bytes_searched,duration_secs
+    printf "command,needle,block_size_bytes,simd,parallelism,num_readers,batch_multiplier,pin_threads,bytes_searched,duration_secs\n" \
         > "${OUT_PARALLEL_L3}"
 
     for block_size in "${L3_BLOCK_SIZES[@]}"; do
         for parallelism in "${PARALLELISM_VALUES[@]}"; do
-            for pin_flag in "" "--pin-threads"; do
-                declare pin_label="false"
-                if [[ "${pin_flag}" == "--pin-threads" ]]; then pin_label="true"; fi
-                printf "  parallel_l3  bs=%-6s  p=%-4s  l3=%s  pin=%s\n" \
-                    "${block_size}" "${parallelism}" "${L3_CACHE_SIZE}" "${pin_label}" >&2
-                declare -a args=(
-                    --input-file="${INPUT_FILE}"
-                    --block-size="${block_size}"
-                    --needle="${NEEDLE}"
-                    --output-format=csv
-                )
-                declare -a command_args=(
-                    --parallelism="${parallelism}"
-                    --l3-cache-size="${L3_CACHE_SIZE}"
-                )
-                [[ -n "${pin_flag}" ]] && command_args+=("${pin_flag}")
-                run_bench "${args[@]}" parallel \
-                    "${command_args[@]}" \
-                    >> "${OUT_PARALLEL_L3}"
-                sync "${OUT_PARALLEL_L3}"
+            for num_readers in "${NUM_READERS_VALUES[@]}"; do
+                for pin_flag in "" "--pin-threads"; do
+                    declare pin_label="false"
+                    if [[ "${pin_flag}" == "--pin-threads" ]]; then pin_label="true"; fi
+                    printf "  parallel_l3  bs=%-6s  p=%-4s  r=%-4s  l3=%s  pin=%s\n" \
+                        "${block_size}" "${parallelism}" "${num_readers}" "${L3_CACHE_SIZE}" "${pin_label}" >&2
+                    declare -a args=(
+                        --input-file="${INPUT_FILE}"
+                        --block-size="${block_size}"
+                        --needle="${NEEDLE}"
+                        --output-format=csv
+                    )
+                    declare -a command_args=(
+                        --parallelism="${parallelism}"
+                        --num-readers="${num_readers}"
+                        --l3-cache-size="${L3_CACHE_SIZE}"
+                    )
+                    [[ -n "${pin_flag}" ]] && command_args+=("${pin_flag}")
+                    run_bench "${args[@]}" parallel \
+                        "${command_args[@]}" \
+                        >> "${OUT_PARALLEL_L3}"
+                    sync "${OUT_PARALLEL_L3}"
+                done
             done
         done
     done

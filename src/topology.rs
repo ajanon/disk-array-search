@@ -49,43 +49,6 @@ fn read_topology_attr(cpu_name: &str, attr: &str) -> Option<u32> {
     std::fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
-/// Builds an ordered list of `parallelism` core IDs for rayon thread pinning.
-///
-/// Threads are packed by die so that consecutive rayon thread indices share
-/// L3 cache. With 2 dies and `parallelism=4`:
-///   thread 0 → die 0 core 0
-///   thread 1 → die 0 core 1
-///   thread 2 → die 1 core 0
-///   thread 3 → die 1 core 1
-///
-/// This pairs nicely with sequential block dispatch: rayon tends to give
-/// lower-indexed threads the first blocks, so die 0's threads scan the first
-/// half of the batch while die 1's threads scan the second half — each half
-/// fitting in that die's L3.
-pub fn pinning_list(parallelism: usize, groups: &BTreeMap<DieId, Vec<usize>>) -> Vec<usize> {
-    if groups.is_empty() {
-        return vec![];
-    }
-
-    let n_dies = groups.len();
-    let threads_per_die = parallelism.div_ceil(n_dies);
-
-    let mut result = Vec::with_capacity(parallelism);
-    'outer: for die_cores in groups.values() {
-        for i in 0..threads_per_die {
-            if result.len() >= parallelism {
-                break 'outer;
-            }
-            // If a die has fewer physical cores than threads_per_die, reuse
-            // the last core (SMT sibling would be better, but this is safe).
-            let core_id = *die_cores.get(i).or_else(|| die_cores.last()).unwrap();
-            result.push(core_id);
-        }
-    }
-
-    result
-}
-
 /// Computes a batch multiplier that sizes the total batch to approximately
 /// `fill_fraction` of the total L3 cache, so the data scanned by each thread
 /// in a batch fits within its die's cache.
