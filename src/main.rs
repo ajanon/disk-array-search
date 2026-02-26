@@ -22,13 +22,8 @@ fn parse_byte(s: &str) -> Result<u8, ParseIntError> {
 enum OutputFormat {
     /// Human-readable output on stdout
     Plain,
-    /// CSV line on stdout (no header). Columns vary by subcommand:
-    ///
-    /// ```text
-    /// sequential: command,needle,block_size_bytes,simd,bytes_searched,duration_secs
-    /// parallel:   command,needle,block_size_bytes,simd,parallelism,batch_multiplier,bytes_searched,duration_secs
-    /// async:      command,needle,block_size_bytes,simd,read_parallelism,search_parallelism,bytes_searched,duration_secs
-    /// ```
+    /// CSV line on stdout; columns vary by subcommand (see --output-format
+    /// help)
     Csv,
 }
 
@@ -58,8 +53,19 @@ struct Cli {
     #[arg(long, default_value = "0x42", value_parser = parse_byte)]
     needle: u8,
 
-    /// Output format
-    #[arg(long, value_enum, default_value = "plain")]
+    /// Output format (use -h for csv column details)
+    #[arg(
+        long,
+        value_enum,
+        default_value = "plain",
+        long_help = "Output format.\n\nFor csv, columns depend on the subcommand:\n  sequential: \
+                     command,needle,block_size_bytes,simd,bytes_searched,duration_secs\n  \
+                     parallel:   \
+                     command,needle,block_size_bytes,simd,parallelism,batch_multiplier,\
+                     bytes_searched,duration_secs\n  async:      \
+                     command,needle,block_size_bytes,simd,read_parallelism,search_parallelism,\
+                     bytes_searched,duration_secs"
+    )]
     output_format: OutputFormat,
 
     #[command(subcommand)]
