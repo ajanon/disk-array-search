@@ -1,3 +1,4 @@
+use std::num::ParseIntError;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,7 +10,13 @@ mod r#async;
 mod parallel;
 mod sequential;
 
-const NEEDLE: u8 = 0x42;
+fn parse_byte(s: &str) -> Result<u8, ParseIntError> {
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u8::from_str_radix(hex, 16)
+    } else {
+        s.parse::<u8>()
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "disk-array-search")]
@@ -26,6 +33,10 @@ struct Cli {
     /// Disable SIMD optimization for search
     #[arg(long)]
     no_simd: bool,
+
+    /// Byte value to search for (decimal or hex with 0x prefix, e.g. 66 or 0x42)
+    #[arg(long, default_value = "0x42", value_parser = parse_byte)]
+    needle: u8,
 
     #[command(subcommand)]
     command: Commands,
@@ -82,7 +93,7 @@ async fn main() -> Result<()> {
                 block_size: usize::try_from(cli.block_size.as_u64())?,
                 use_simd: !cli.no_simd,
             };
-            searcher.search(&cli.input_file, NEEDLE)?
+            searcher.search(&cli.input_file, cli.needle)?
         },
         Commands::Parallel {
             parallelism,
@@ -98,7 +109,7 @@ async fn main() -> Result<()> {
                 batch_multiplier,
                 use_simd: !cli.no_simd,
             };
-            searcher.search(&cli.input_file, NEEDLE)?
+            searcher.search(&cli.input_file, cli.needle)?
         },
         Commands::Async {
             read_parallelism,
@@ -114,7 +125,7 @@ async fn main() -> Result<()> {
                 search_parallelism,
                 use_simd: !cli.no_simd,
             };
-            searcher.search(&cli.input_file, NEEDLE).await?
+            searcher.search(&cli.input_file, cli.needle).await?
         },
     };
     let end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
