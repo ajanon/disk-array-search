@@ -97,6 +97,7 @@ benchmark_sequential() {
             )
             [[ -n "${simd_flag}" ]] && args+=("${simd_flag}")
             run_bench "${args[@]}" sequential >> "${OUT_SEQUENTIAL}"
+            sync "${OUT_SEQUENTIAL}"
         done
     done
 }
@@ -125,6 +126,7 @@ benchmark_parallel() {
                         --parallelism="${parallelism}" \
                         --batch-multiplier="${batch_mult}" \
                         >> "${OUT_PARALLEL}"
+                    sync "${OUT_PARALLEL}"
                 done
             done
         done
@@ -155,6 +157,7 @@ benchmark_async() {
                         --read-parallelism="${read_p}" \
                         --search-parallelism="${search_p}" \
                         >> "${OUT_ASYNC}"
+                    sync "${OUT_ASYNC}"
                 done
             done
         done
