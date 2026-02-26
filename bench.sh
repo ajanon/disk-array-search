@@ -198,10 +198,6 @@ benchmark() {
     done
 }
 
-generate_graphs() {
-    printf "TODO" >&2
-}
-
 main() {
     declare command="${1:-all}"
     shift || true
@@ -213,9 +209,6 @@ main() {
         benchmark)
             benchmark "$@"
             ;;
-        plot)
-            generate_graphs
-            ;;
         all)
             prepare
             benchmark "$@"
@@ -226,7 +219,6 @@ main() {
             printf "Commands:\n" >&2
             printf "  prepare    - Prepare input file with needle at last byte\n" >&2
             printf "  benchmark  - Run benchmarks (default: all; or pass subset: sequential parallel async)\n" >&2
-            printf "  plot       - Generate graphs from CSV results\n" >&2
             printf "  all        - Run prepare + benchmark (default)\n" >&2
             exit 1
             ;;
